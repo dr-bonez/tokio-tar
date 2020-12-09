@@ -308,8 +308,8 @@ impl<R: Read + Unpin> Read for Entry<R> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        into: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        into: &mut io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.as_mut().fields).poll_read(cx, into)
     }
 }
@@ -848,8 +848,8 @@ impl<R: Read + Unpin> Read for EntryFields<R> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        into: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        into: &mut io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         let mut this = self.get_mut();
         loop {
             if this.read_state.is_none() {
@@ -864,10 +864,10 @@ impl<R: Read + Unpin> Read for EntryFields<R> {
             if let Some(ref mut io) = &mut this.read_state {
                 let ret = Pin::new(io).poll_read(cx, into);
                 match ret {
-                    Poll::Ready(Ok(0)) => {
+                    Poll::Ready(Ok(())) if into.filled().len() == 0 => {
                         this.read_state = None;
                         if this.data.is_empty() {
-                            return Poll::Ready(Ok(0));
+                            return Poll::Ready(Ok(()));
                         }
                         continue;
                     }
@@ -883,7 +883,7 @@ impl<R: Read + Unpin> Read for EntryFields<R> {
                 }
             } else {
                 // Unable to pull another value from `data`, so we are done.
-                return Poll::Ready(Ok(0));
+                return Poll::Ready(Ok(()));
             }
         }
     }
@@ -893,8 +893,8 @@ impl<R: Read + Unpin> Read for EntryIo<R> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        into: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        into: &mut io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         match self.get_mut() {
             EntryIo::Pad(ref mut io) => Pin::new(io).poll_read(cx, into),
             EntryIo::Data(ref mut io) => Pin::new(io).poll_read(cx, into),
@@ -937,12 +937,13 @@ fn poll_read_all_internal<R: Read + ?Sized>(
             }
         }
 
-        match futures_core::ready!(rd.as_mut().poll_read(cx, &mut g.buf[g.len..])) {
-            Ok(0) => {
+        let mut read_buf = io::ReadBuf::new(&mut g.buf[g.len..]);
+        match futures_core::ready!(rd.as_mut().poll_read(cx, &mut read_buf)) {
+            Ok(()) if read_buf.filled().is_empty() => {
                 ret = Poll::Ready(Ok(g.len));
                 break;
             }
-            Ok(n) => g.len += n,
+            Ok(()) => g.len += read_buf.filled().len(),
             Err(e) => {
                 ret = Poll::Ready(Err(e));
                 break;
