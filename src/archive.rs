@@ -9,11 +9,10 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    io,
-    prelude::{AsyncRead as Read, *},
-    stream::*,
+    io::{self, AsyncRead as Read, AsyncReadExt},
     sync::Mutex,
 };
+use tokio_stream::Stream;
 
 use crate::{
     entry::{EntryFields, EntryIo},
@@ -223,6 +222,8 @@ impl<R: Read + Unpin + Sync + Send> Archive<R> {
     /// # Ok(()) }) }
     /// ```
     pub async fn unpack<P: AsRef<Path>>(&mut self, dst: P) -> io::Result<()> {
+        use tokio_stream::StreamExt;
+
         let mut entries = self.entries()?;
         let mut pinned = Pin::new(&mut entries);
         while let Some(entry) = pinned.next().await {
@@ -395,7 +396,7 @@ fn poll_next_raw<R: Read + Unpin>(
     let file_pos = *next;
     let size = header.entry_size()?;
 
-    let data = EntryIo::Data(archive.clone().take(size));
+    let data = EntryIo::Data(io::AsyncReadExt::take(archive.clone(), size));
 
     let ret = EntryFields {
         size,

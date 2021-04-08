@@ -14,8 +14,7 @@ use std::{
 use tokio::{
     fs,
     fs::OpenOptions,
-    io,
-    prelude::{AsyncRead as Read, *},
+    io::{self, AsyncRead as Read, AsyncReadExt, AsyncSeekExt},
 };
 
 /// A read-only view into an entry of an archive.
@@ -588,7 +587,7 @@ impl<R: Read + Unpin> EntryFields<R> {
 
             #[cfg(any(unix, target_os = "redox"))]
             async fn symlink(src: &Path, dst: &Path) -> io::Result<()> {
-                tokio::fs::os::unix::symlink(src, dst).await
+                tokio::fs::symlink(src, dst).await
             }
         } else if kind.is_pax_global_extensions()
             || kind.is_pax_local_extensions()
@@ -626,7 +625,7 @@ impl<R: Read + Unpin> EntryFields<R> {
                 .create_new(true)
                 .open(dst)
                 .await
-        };
+        }
         let mut f = async {
             let mut f = match open(dst).await {
                 Ok(f) => Ok(f),
